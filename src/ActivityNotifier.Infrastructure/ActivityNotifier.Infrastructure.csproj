@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Outside-world adapters: database (EF Core + SQLite) and Gemini HTTP client. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ActivityNotifier.Core\ActivityNotifier.Core.csproj" />
+  </ItemGroup>
+
+</Project>

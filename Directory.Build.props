@@ -1,0 +1,25 @@
+<!--
+  MSBuild automatically imports this file into every .csproj below this folder.
+  Put settings here that ALL projects share, so each .csproj stays small.
+-->
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Strict build: any warning fails the build, so problems cannot be ignored. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Built-in .NET code analyzers (quality, reliability, security rules). -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!-- Also enforce code-style rules (IDExxxx) during build, not only in the editor. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Required by some IDE analyzers (e.g. unused usings) to run in the build. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- Security: check every package, including transitive ones, against known vulnerabilities on restore. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+  </PropertyGroup>
+</Project>
