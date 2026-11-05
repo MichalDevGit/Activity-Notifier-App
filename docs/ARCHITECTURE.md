@@ -45,7 +45,8 @@ Tests ──► the project they test
                                          ▼
                                   DbWriterService ──► IActivityRepository (EF Core / SQLite)
 
- SystemEventsMonitor (lock/unlock, sleep/resume) ──► ActivityTracker.InterruptSession(reason)
+ SystemEventsMonitor (sleep, shutdown) ──► ActivityTracker.InterruptSession(reason)
+   (screen lock does NOT end a session; a lock ≥ idle threshold ends it via the normal idle rule)
 
  RulesService (PeriodicTimer) ──► tracker.GetSnapshot() ──► RulesEngine.Evaluate()
                                                                 │ raises NotificationRequested
@@ -78,20 +79,22 @@ Tests ──► the project they test
 ### Core (`src/ActivityNotifier.Core/`)
 | Status | Component | Path | Responsibility |
 |---|---|---|---|
-| ⬜ | `ActivityMinute` (record) | `Models/ActivityMinute.cs` | One minute bucket: `MinuteStartUtc`, `Keystrokes`, `Clicks`, `MouseDistancePx` |
-| ⬜ | `ActivitySnapshot` (record) | `Models/ActivitySnapshot.cs` | Immutable view for rules: session start, continuous duration, last active time, recent minutes |
-| ⬜ | `SessionEndReason` (enum) | `Models/SessionEndReason.cs` | `Idle`, `Lock`, `Sleep`, `Shutdown` |
-| ⬜ | `RuleType` (enum) | `Models/RuleType.cs` | `Hydration`, `MicroBreak`, `LongBreak`, `Fingers` |
-| ⬜ | `NotificationRequest` (record) | `Models/NotificationRequest.cs` | Rule type + context numbers for the suggester |
-| ⬜ | `InputCounters` | `Tracking/InputCounters.cs` | Lock-free counters (`Interlocked`). `Snapshot()` atomically reads and resets. |
-| ⬜ | `ActivityTracker` | `Tracking/ActivityTracker.cs` | Session detection (idle ≥ `IdleThreshold` ends session). Holds recent minutes. Guarded by `System.Threading.Lock`. Events `SessionStarted`, `SessionEnded`. `GetSnapshot()`. |
+| ✅ | `ActivityMinute` (record) | `Models/ActivityMinute.cs` | One minute bucket: `MinuteStartUtc`, `Keystrokes`, `Clicks`, `MouseDistancePx`; `MinuteEndUtc`, `IsActive` |
+| ✅ | `ActivitySnapshot` (record) | `Models/ActivitySnapshot.cs` | Immutable "photo" for rules: `SessionStartUtc`, `LastActiveUtc` (kept after session end), `ContinuousDuration`, `RecentMinutes` (last 60 min), `IsInSession` |
+| ✅ | `SessionEndReason` (enum) | `Models/SessionEndReason.cs` | `Idle`, `Sleep`, `Shutdown` (no `Lock`: see §6) |
+| ✅ | `SessionStartedEventArgs`, `SessionEndedEventArgs` | `Models/*.cs` | Event data: start time / start, end, reason |
+| ⬜ M2 | `RuleType` (enum) | `Models/RuleType.cs` | `Hydration`, `MicroBreak`, `LongBreak`, `Fingers` |
+| ⬜ M2 | `NotificationRequest` (record) | `Models/NotificationRequest.cs` | Rule type + context numbers for the suggester |
+| ✅ | `InputCounters` | `Tracking/InputCounters.cs` | Lock-free counters (`Interlocked`). `Snapshot(minuteStartUtc)` atomically reads and resets each counter, returns an `ActivityMinute`. |
+| ✅ | `ActivityTracker` | `Tracking/ActivityTracker.cs` | Session detection (see §6). `RecordMinute`, `InterruptSession(reason)`, `GetSnapshot()`. Keeps last 60 min. Guarded by `System.Threading.Lock`; events `SessionStarted`, `SessionEnded` raised **outside** the lock. No clock: all times come from the minutes. |
 | ⬜ | `IActivityRule` | `Rules/IActivityRule.cs` | `RuleType Type`, `int Priority`, `bool ShouldTrigger(ActivitySnapshot, DateTimeOffset nowUtc, RuleState state)` |
 | ⬜ | `HydrationRule` | `Rules/HydrationRule.cs` | See §6 |
 | ⬜ | `MicroBreakRule` | `Rules/MicroBreakRule.cs` | See §6 |
 | ⬜ | `LongBreakRule` | `Rules/LongBreakRule.cs` | See §6 |
 | ⬜ | `FingersRule` | `Rules/FingersRule.cs` | See §6 |
 | ⬜ | `RulesEngine` | `Rules/RulesEngine.cs` | Evaluates rules by priority. Applies cooldowns, snooze, and "one notification at a time". Event `NotificationRequested`. `Acknowledge(RuleType)`, `Snooze(RuleType, TimeSpan)`. Guarded by `Lock`. |
-| ⬜ | `RulesOptions`, `TrackingOptions` | `Options/*.cs` | Thresholds bound from `appsettings.json`, with DataAnnotations validation |
+| ✅ | `TrackingOptions` | `Options/TrackingOptions.cs` | `IdleThresholdMinutes` [1–60], default 5. (`ActiveNowMinutes` added in M2.) |
+| ⬜ | `RulesOptions` | `Options/RulesOptions.cs` | Rule thresholds bound from `appsettings.json`, with DataAnnotations validation |
 | ⬜ | `IActivityRepository` | `Abstractions/IActivityRepository.cs` | Save minutes, sessions, notifications. Query today's stats. |
 | ⬜ | `IExerciseSuggester` | `Abstractions/IExerciseSuggester.cs` | `Task<string> SuggestAsync(NotificationRequest, CancellationToken)` |
 | ⬜ | `INotifier` | `Abstractions/INotifier.cs` | Show a notification with Done/Snooze actions |
@@ -139,7 +142,11 @@ All timestamps are UTC (`DateTimeOffset` stored as UTC ticks / ISO text).
 **Definitions**
 - *Active minute*: a minute bucket with any input.
 - *Active now*: last input ≤ 2 min ago.
-- *Session*: consecutive activity. Ends after idle ≥ **5 min**, lock, or sleep.
+- *Session*: one continuous stretch of work. Starts at the first active minute. Ends after idle ≥ **5 min**, sleep, or shutdown.
+  - The recorded end time is **when it really ended** (end of the last active minute), not when it was detected.
+  - **Screen lock does not end a session.** A short lock keeps it; a lock ≥ 5 min ends it through the idle rule.
+  - **Gaps** (no minutes recorded, e.g. sleep): if an active minute arrives ≥ 5 min after the last activity, the old session is closed at its last activity and a new one starts.
+  - Precision is **per minute** (accepted).
 
 | Rule | Priority | Triggers when | Repeat / cooldown |
 |---|---|---|---|
