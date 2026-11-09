@@ -19,4 +19,14 @@ public sealed class TrackingOptions
 
     /// <summary><see cref="IdleThresholdMinutes"/> as a <see cref="TimeSpan"/>.</summary>
     public TimeSpan IdleThreshold => TimeSpan.FromMinutes(IdleThresholdMinutes);
+
+    /// <summary>
+    /// "Active now" means the last input was at most this many minutes ago.
+    /// Reminders are sent only to someone who is active now.
+    /// </summary>
+    [Range(1, 10)]
+    public int ActiveNowMinutes { get; set; } = 2;
+
+    /// <summary><see cref="ActiveNowMinutes"/> as a <see cref="TimeSpan"/>.</summary>
+    public TimeSpan ActiveNow => TimeSpan.FromMinutes(ActiveNowMinutes);
 }

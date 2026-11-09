@@ -43,7 +43,7 @@
 |---|---|---|---|---|
 | ✅ | **M0** | Docs (this file, ARCHITECTURE.md, CLAUDE.md) → owner review. Then: git init, solution, projects, `Directory.Build.props`, `Directory.Packages.props`, empty test projects, `.gitignore` | 8 (partial), 10 | 0.5 d |
 | ✅ | **M1** | Core models, `InputCounters`, `ActivityTracker` (sessions, events, Lock, snapshots) + tests. `RuleType` / `NotificationRequest` moved to M2. | 1, 2, 3, 6 (partial) | 0.5 d |
-| ⬜ | **M2** | `RuleType`, `NotificationRequest`, 4 rules, `RulesEngine` (priority, cooldown, snooze, events) + tests | 1, 2, 3 | 0.5 d |
+| ✅ | **M2** | `RuleType`, `NotificationRequest`, 4 rules, `RulesEngine` (priority, cooldown, snooze, events) + tests | 1, 2, 3 | 0.5 d |
 | ⬜ | **M3** | Threading layer: Host, `MinuteAggregatorService`, `RulesService`, channels, single-instance mutex, graceful shutdown, concurrency tests | 6, 10 | 0.5 d |
 | ⬜ | **M4** | Windows: P/Invoke hooks thread, `IdleDetector`, `SystemEventsMonitor`, tray, `ToastNotifier`, `StaticExerciseSuggester` → **first working app** | 4, 5 | 0.5–1 d |
 | ⬜ | **M5** | EF Core + SQLite: entities, `DbContext`, migration, repository, `DbWriterService` + in-memory tests | 7 | 0.5 d |

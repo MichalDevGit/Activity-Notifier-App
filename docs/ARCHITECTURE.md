@@ -55,7 +55,7 @@ Tests ──► the project they test
                                                        │ IExerciseSuggester (Gemini → fallback Static)
                                                        │ INotifier (Toast, marshalled to UI thread)
                                                        └ Channel<NotificationRecord> → DbWriterService
- Toast buttons (Done / Snooze) ──► RulesEngine.Acknowledge / Snooze
+ Toast buttons: Snooze ──► RulesEngine.Snooze(rule)   (Done only closes the toast in P1)
 ```
 
 ## 3. Threading model
@@ -83,18 +83,20 @@ Tests ──► the project they test
 | ✅ | `ActivitySnapshot` (record) | `Models/ActivitySnapshot.cs` | Immutable "photo" for rules: `SessionStartUtc`, `LastActiveUtc` (kept after session end), `ContinuousDuration`, `RecentMinutes` (last 60 min), `IsInSession` |
 | ✅ | `SessionEndReason` (enum) | `Models/SessionEndReason.cs` | `Idle`, `Sleep`, `Shutdown` (no `Lock`: see §6) |
 | ✅ | `SessionStartedEventArgs`, `SessionEndedEventArgs` | `Models/*.cs` | Event data: start time / start, end, reason |
-| ⬜ M2 | `RuleType` (enum) | `Models/RuleType.cs` | `Hydration`, `MicroBreak`, `LongBreak`, `Fingers` |
-| ⬜ M2 | `NotificationRequest` (record) | `Models/NotificationRequest.cs` | Rule type + context numbers for the suggester |
+| ✅ | `RuleType` (enum) | `Models/RuleType.cs` | `Hydration`, `MicroBreak`, `LongBreak`, `Fingers` |
+| ✅ | `NotificationRequest` (record) | `Models/NotificationRequest.cs` | `Rule`, `CreatedUtc`, `ContinuousWork`, `KeystrokesLastHour` (aggregated numbers only, for the suggester) |
+| ✅ | `NotificationRequestedEventArgs` | `Models/NotificationRequestedEventArgs.cs` | Event data: the `NotificationRequest` |
 | ✅ | `InputCounters` | `Tracking/InputCounters.cs` | Lock-free counters (`Interlocked`). `Snapshot(minuteStartUtc)` atomically reads and resets each counter, returns an `ActivityMinute`. |
 | ✅ | `ActivityTracker` | `Tracking/ActivityTracker.cs` | Session detection (see §6). `RecordMinute`, `InterruptSession(reason)`, `GetSnapshot()`. Keeps last 60 min. Guarded by `System.Threading.Lock`; events `SessionStarted`, `SessionEnded` raised **outside** the lock. No clock: all times come from the minutes. |
-| ⬜ | `IActivityRule` | `Rules/IActivityRule.cs` | `RuleType Type`, `int Priority`, `bool ShouldTrigger(ActivitySnapshot, DateTimeOffset nowUtc, RuleState state)` |
-| ⬜ | `HydrationRule` | `Rules/HydrationRule.cs` | See §6 |
-| ⬜ | `MicroBreakRule` | `Rules/MicroBreakRule.cs` | See §6 |
-| ⬜ | `LongBreakRule` | `Rules/LongBreakRule.cs` | See §6 |
-| ⬜ | `FingersRule` | `Rules/FingersRule.cs` | See §6 |
-| ⬜ | `RulesEngine` | `Rules/RulesEngine.cs` | Evaluates rules by priority. Applies cooldowns, snooze, and "one notification at a time". Event `NotificationRequested`. `Acknowledge(RuleType)`, `Snooze(RuleType, TimeSpan)`. Guarded by `Lock`. |
-| ✅ | `TrackingOptions` | `Options/TrackingOptions.cs` | `IdleThresholdMinutes` [1–60], default 5. (`ActiveNowMinutes` added in M2.) |
-| ⬜ | `RulesOptions` | `Options/RulesOptions.cs` | Rule thresholds bound from `appsettings.json`, with DataAnnotations validation |
+| ✅ | `IActivityRule` | `Rules/IActivityRule.cs` | `RuleType Type`, `int Priority` (lower = more important), `bool IsDue(RuleContext)`. Called only inside the engine's lock. |
+| ✅ | `RuleContext` (record) | `Rules/RuleContext.cs` | `Snapshot`, `NowUtc`, `LocalTimeZone`, `LastFired`; helpers `LastFiredUtc(rule)`, `WorkSinceLastReminder(rules…)` |
+| ✅ | `HydrationRule` | `Rules/HydrationRule.cs` | See §6 |
+| ✅ | `MicroBreakRule` | `Rules/MicroBreakRule.cs` | See §6 |
+| ✅ | `LongBreakRule` | `Rules/LongBreakRule.cs` | See §6 |
+| ✅ | `FingersRule` | `Rules/FingersRule.cs` | See §6 |
+| ✅ | `RulesEngine` | `Rules/RulesEngine.cs` | `Evaluate(ActivitySnapshot)`, `Snooze(RuleType, TimeSpan? = default)`. Applies the engine policies (§6). Event `NotificationRequested` raised outside the lock. Uses `TimeProvider`. Guarded by `Lock`. No `Acknowledge` in P1. |
+| ✅ | `TrackingOptions` | `Options/TrackingOptions.cs` | `IdleThresholdMinutes` [1–60] = 5, `ActiveNowMinutes` [1–10] = 2 |
+| ✅ | `RulesOptions` | `Options/RulesOptions.cs` | Hydration/MicroBreak/LongBreak/Fingers thresholds, `MinGapMinutes`, `SnoozeMinutes`, with `[Range]` validation |
 | ⬜ | `IActivityRepository` | `Abstractions/IActivityRepository.cs` | Save minutes, sessions, notifications. Query today's stats. |
 | ⬜ | `IExerciseSuggester` | `Abstractions/IExerciseSuggester.cs` | `Task<string> SuggestAsync(NotificationRequest, CancellationToken)` |
 | ⬜ | `INotifier` | `Abstractions/INotifier.cs` | Show a notification with Done/Snooze actions |
@@ -150,16 +152,20 @@ All timestamps are UTC (`DateTimeOffset` stored as UTC ticks / ISO text).
 
 | Rule | Priority | Triggers when | Repeat / cooldown |
 |---|---|---|---|
-| 💧 Hydration | 3 | Active now **and** ≥ 2 active minutes in the current **local clock hour** **and** not yet reminded this clock hour | Once per clock hour. **No catch-up** for hours you were away. Returning mid-hour gives one reminder for the current hour. |
-| 🚶 LongBreak | 1 (highest) | Continuous session ≥ 90 min | Every 90 min of continuous work |
-| 🧍 MicroBreak | 2 | Continuous session ≥ 50 min (and LongBreak not due) | Every 50 min of continuous work |
+| 💧 Hydration | 3 | ≥ 2 active minutes in the current **local clock hour** **and** not yet reminded this clock hour | Once per clock hour. **No catch-up** for hours you were away. Returning mid-hour gives one reminder for the current hour. |
+| 🚶 LongBreak | 1 (highest) | ≥ 90 min of work since the session start **or the last LongBreak reminder** | A MicroBreak reminder does **not** restart this count (a stretch is not a long break) |
+| 🧍 MicroBreak | 2 | ≥ 50 min of work since the session start **or the last break reminder of either kind** | A LongBreak reminder also restarts this count |
 | ✋ Fingers | 4 | ≥ 4000 keystrokes in the last 30 min | Cooldown 45 min |
 
-**Engine policies**
-- At most one notification per evaluation (highest priority wins).
-- Minimum gap of 3 min between any two notifications.
-- Snooze (default 10 min) suppresses that rule until it expires.
-- A session ending (real break) resets break-rule counters.
+"Work" = from the count start to the last activity. Example of one long session: 09:00 start → 09:50 Micro → 10:30 Long → 11:20 Micro → 12:00 Long.
+Suggested break lengths (in the notification text): micro 1–3 min, long 10–15 min. A long break ≥ 5 min ends the session, so **all counts restart automatically** (new session start time; reminders from earlier sessions are ignored).
+
+**Engine policies** (checked in this order on every `Evaluate`)
+1. Only when **active now** (last input ≤ 2 min ago), for all rules. Otherwise nothing, and rules are not asked.
+2. Minimum gap of **3 min** between any two notifications.
+3. Snooze = **"remind me again in 10 min"**: the rule is silent until the snooze ends, then the same reminder comes back once (even if the rule itself is not due). A snoozed **break** reminder is dropped if a new session started after the snooze (the user took a real break).
+4. **At most one** notification per evaluation: the most important ready rule wins.
+- Sending a reminder counts as "reminded" (the rule's count / cooldown restarts). An ignored notification is not repeated. "Done" has no effect on the rules in P1.
 
 ## 7. Configuration (`appsettings.json`)
 Sections: `Tracking` (IdleThresholdMinutes, ActiveNowMinutes), `Rules` (per-rule thresholds and cooldowns), `Gemini` (Model, Endpoint, TimeoutSeconds). Validated with `ValidateDataAnnotations().ValidateOnStart()`. **No secrets.** The API key is in the DPAPI-protected file `%LOCALAPPDATA%\ActivityNotifier\gemini.key`.

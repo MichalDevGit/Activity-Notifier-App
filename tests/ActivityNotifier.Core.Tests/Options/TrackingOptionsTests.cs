@@ -19,6 +19,14 @@ public sealed class TrackingOptionsTests
         Assert.False(IsValid(new TrackingOptions { IdleThresholdMinutes = minutes }));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(11)]
+    public void Validate_ActiveNowOutOfRange_Fails(int minutes)
+    {
+        Assert.False(IsValid(new TrackingOptions { ActiveNowMinutes = minutes }));
+    }
+
     // The same check the app runs at startup (ValidateDataAnnotations).
     private static bool IsValid(TrackingOptions options) =>
         Validator.TryValidateObject(options, new ValidationContext(options), validationResults: null, validateAllProperties: true);
