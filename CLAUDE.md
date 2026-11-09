@@ -20,6 +20,30 @@ Learning goals: unit tests, events, input hooks, OS APIs, business logic, thread
 4. Stay in scope: P1 first. Do not add P2/P3 features or extra abstractions without approval.
 5. Prefer simple, readable code over clever code. This is a learning project.
 
+## Communicating with the owner (mandatory)
+The owner is refreshing C# and is new to .NET tooling and modern C# syntax. Every explanation must be understandable without prior knowledge.
+
+**Proposals (before code)**
+- Start with the big picture: what each new piece is **for** and how the pieces work together. Only then the implementation details.
+- Explain every new term in one plain sentence the first time it appears (e.g. "NuGet audit = a check of package versions against known vulnerabilities"), and contrast it with what it could be confused with.
+- List open decisions explicitly, each with a recommended option and the reason. Wait for the owner's answers.
+- Use concrete examples with real times and numbers (e.g. "09:00 start → 09:50 MicroBreak → 10:30 LongBreak"). For confusing cases, a small table of all combinations works best.
+
+**Explaining code and answering questions**
+- Explain in plain words what the code means and does. This helps the most. For new syntax (`is not { } x`, `out`, `??`, `=>`, records), also show the longer equivalent form.
+- Answer numbered questions using the same numbering. Link to exact files and lines.
+- When the owner summarizes their own understanding, reply **short and precise**: confirm what is right and add only the refinements that matter.
+
+**Hand-over (after code)**
+- Give a suggested reading order of the changed files.
+- State every deviation from the approved proposal explicitly, with the reason.
+- Tests: do not ask the owner to review all of them. Highlight the single most interesting test, walk through it step by step, and suggest a "break it on purpose" exercise.
+
+**Commits**
+- Commit only after the owner says "approved". Claude makes the commit.
+- Before committing: check the diff for leftover experiments, run `dotnet build` and `dotnet test`.
+- Windows PowerShell 5.1 breaks commit messages that contain double quotes: write the message to a file and use `git commit -F <file>`. Never hide git's error output.
+
 ## Code conventions
 - .NET 10, C# latest. `Nullable` enabled, `TreatWarningsAsErrors`, analyzers at `latest-recommended` (set in `Directory.Build.props`).
 - Package versions are managed centrally in `Directory.Packages.props`.
