@@ -31,6 +31,9 @@ The owner is refreshing C# and is new to .NET tooling and modern C# syntax. Ever
 
 **Explaining code and answering questions**
 - Explain in plain words what the code means and does. This helps the most. For new syntax (`is not { } x`, `out`, `??`, `=>`, records), also show the longer equivalent form.
+- **Tell the flow as a story in words** (who calls whom, on which thread, what happens next). Diagrams and examples support the story; they do not replace it.
+- **Focus on how C# and .NET work, not on business logic.** For each component, give its role and general workflow briefly. Go into detail only where there is something to learn about C# or .NET (threads, async, DI, events, patterns, why this way vs alternatives). Business-logic lines that teach nothing about C# get a sentence at most.
+- **Don't repeat what was already explained.** Refer back to it instead. When a portion mixes new and familiar material, mark clearly what is new and important, so the owner can focus on it.
 - Answer numbered questions using the same numbering. Link to exact files and lines.
 - When the owner summarizes their own understanding, reply **short and precise**: confirm what is right and add only the refinements that matter.
 
