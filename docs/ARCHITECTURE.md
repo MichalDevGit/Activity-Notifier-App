@@ -17,6 +17,7 @@ ActivityNotifier.slnx               # Solution: lists all projects
 │  └─ ActivityNotifier.App/             net10.0-windows10.0.19041.0  WinForms tray, hooks, OS APIs, DPAPI, Host (composition root)
 └─ tests/
    ├─ ActivityNotifier.Core.Tests/            xUnit: rules, tracker, engine, concurrency
+   ├─ ActivityNotifier.App.Tests/             xUnit: background services on a FakeTimeProvider (net10.0-windows)
    └─ ActivityNotifier.Infrastructure.Tests/  xUnit: repositories (SQLite in-memory), Gemini client (fake handler)
 ```
 
@@ -37,11 +38,11 @@ Tests ──► the project they test
        │  WH_KEYBOARD_LL / WH_MOUSE_LL  (Hook thread)
        ▼
  InputHookService ──Interlocked++──► InputCounters
-                                         │  every minute: Snapshot() (Interlocked.Exchange)
+                                         │  every whole clock minute: Snapshot() (Interlocked.Exchange)
                                          ▼
                               MinuteAggregatorService ──► ActivityTracker.RecordMinute()
                                          │                      │ raises SessionStarted / SessionEnded
-                                         │ Channel<ActivityMinute>
+                                         │ Channel<ActivityMinute>   (M5)
                                          ▼
                                   DbWriterService ──► IActivityRepository (EF Core / SQLite)
 
@@ -64,15 +65,16 @@ Tests ──► the project they test
 |---|---|---|---|---|
 | **UI thread** (STA) | `Program` / `TrayApplicationContext` | WinForms message loop, tray menu, showing toasts | none directly | others marshal in via `SynchronizationContext` / `Control.BeginInvoke` |
 | **Hook thread** (dedicated, STA) | `InputHookService` | Own message loop + LL hook callbacks | `InputCounters` | Lock-free `Interlocked`. Last mouse point is only touched by this thread. |
-| **Thread pool**: aggregator | `MinuteAggregatorService` (`BackgroundService`) | `PeriodicTimer` 1 min | `InputCounters` (read+reset), `ActivityTracker` | `Interlocked.Exchange` swap, tracker's `Lock` |
+| **Thread pool**: aggregator | `MinuteAggregatorService` (`BackgroundService`) | `PeriodicTimer`, re-aimed at each whole clock minute | `InputCounters` (read+reset), `ActivityTracker` | `Interlocked.Exchange` swap, tracker's `Lock` |
 | **Thread pool**: rules | `RulesService` (`BackgroundService`) | `PeriodicTimer` 15 s | tracker snapshot, `RulesEngine` state | Immutable `ActivitySnapshot`, engine's `Lock` |
 | **Thread pool**: DB writer | `DbWriterService` (`BackgroundService`) | Consumes channels, batches saves | DB | Single consumer. `IDbContextFactory` (new context per batch). |
 | **SystemEvents thread** | `SystemEventsMonitor` | OS callbacks | `ActivityTracker` | tracker's `Lock` |
 | **Toast activation** (OS callback thread) | `ToastNotifier` | Button clicks | `RulesEngine` | engine's `Lock` |
 
+- **Timers are created in `StartAsync`**, not in `ExecuteAsync`: since .NET 10 the host starts `ExecuteAsync` on a thread-pool thread, so it may begin later. `StartAsync` runs on the caller's thread, so the timer exists as soon as the service is started, and a tick that comes early is kept by `PeriodicTimer`.
 - **Single instance:** named `Mutex` (`Local\ActivityNotifier.SingleInstance`) in `Program.Main`.
 - **AI calls:** `SemaphoreSlim(1,1)` in `NotificationCoordinator`. At most one in flight. Timeout via `CancellationTokenSource`.
-- **Shutdown order:** cancel host token → unhook + stop hook thread → aggregator flushes last minute → channels `Complete()` → DB writer drains → exit.
+- **Shutdown order:** Exit menu → `Application.Run` returns → `host.StopAsync` (5 s timeout) cancels the services' tokens → unhook + stop hook thread (M4) → aggregator records the unfinished minute → channels `Complete()` → DB writer drains (M5) → host disposed → mutex released → exit.
 
 ## 4. Components
 
@@ -115,19 +117,19 @@ Tests ──► the project they test
 ### App (`src/ActivityNotifier.App/`)
 | Status | Component | Path | Responsibility |
 |---|---|---|---|
-| 🟨 | `Program` | `Program.cs` | Single-instance mutex, builds Generic Host, runs WinForms loop. *M0: empty `[STAThread] Main` placeholder (starts and exits).* |
-| ⬜ | `TrayApplicationContext` | `Ui/TrayApplicationContext.cs` | `NotifyIcon`, menu (Pause / Exit), tooltip |
+| ✅ | `Program` | `Program.cs` | Single-instance mutex, builds the Generic Host (composition root: options with `ValidateOnStart`, singletons, hosted services), runs the WinForms loop, then `StopAsync`. `Main` is synchronous on purpose (mutex + STA thread). |
+| 🟨 | `TrayApplicationContext` | `Ui/TrayApplicationContext.cs` | `NotifyIcon`, menu (Pause / Exit), tooltip. *M3: Exit only.* |
 | ⬜ | `NativeMethods` | `Interop/NativeMethods.cs` | P/Invoke: `SetWindowsHookEx`, `UnhookWindowsHookEx`, `CallNextHookEx`, `GetLastInputInfo`, message loop |
 | ⬜ | `InputHookService` | `Input/InputHookService.cs` | Dedicated hook thread. Keeps hook delegates alive (GC). Increments `InputCounters` only. |
 | ⬜ | `IdleDetector` | `Input/IdleDetector.cs` | `GetLastInputInfo` → time since last input |
 | ⬜ | `SystemEventsMonitor` | `Os/SystemEventsMonitor.cs` | `SessionSwitch`, `PowerModeChanged` → tracker. Unsubscribes on dispose. |
 | ⬜ | `ToastNotifier` | `Notifications/ToastNotifier.cs` | Implements `INotifier` (`Microsoft.Toolkit.Uwp.Notifications`). Handles button activation. |
 | ⬜ | `DpapiSecretStore` | `Security/DpapiSecretStore.cs` | Encrypt/decrypt API key file with `ProtectedData` (CurrentUser) |
-| ⬜ | `MinuteAggregatorService` | `Services/MinuteAggregatorService.cs` | `BackgroundService`: each minute counters → tracker + DB channel |
-| ⬜ | `RulesService` | `Services/RulesService.cs` | `BackgroundService`: periodic rule evaluation |
+| ✅ | `MinuteAggregatorService` | `Services/MinuteAggregatorService.cs` | `BackgroundService`: at each whole clock minute counters → tracker. Records the unfinished minute on shutdown. *DB channel added in M5.* |
+| ✅ | `RulesService` | `Services/RulesService.cs` | `BackgroundService`: every 15 s `engine.Evaluate(tracker.GetSnapshot())`. Subscribes to `NotificationRequested` (unsubscribes on stop). *M3: only logs the reminder.* |
 | ⬜ | `NotificationCoordinator` | `Services/NotificationCoordinator.cs` | Handles `NotificationRequested`: suggest (SemaphoreSlim) → notify → record |
 | ⬜ | `DbWriterService` | `Services/DbWriterService.cs` | `BackgroundService`: single consumer of channels, batched writes |
-| ⬜ | `appsettings.json` | `appsettings.json` | Rules/Tracking/Gemini options (no secrets) |
+| 🟨 | `appsettings.json` | `appsettings.json` | Logging levels, Tracking/Rules options (no secrets). Copied next to the .exe. *Gemini section in M6.* |
 
 ## 5. Database (SQLite, `%LOCALAPPDATA%\ActivityNotifier\activity.db`)
 
@@ -174,7 +176,7 @@ Sections: `Tracking` (IdleThresholdMinutes, ActiveNowMinutes), `Rules` (per-rule
 | Project | Packages |
 |---|---|
 | Infrastructure | `Microsoft.EntityFrameworkCore.Sqlite`, `Microsoft.EntityFrameworkCore.Design`, `Microsoft.Extensions.Http`, `Microsoft.Extensions.Options` |
-| App | `Microsoft.Extensions.Hosting`, `Microsoft.Toolkit.Uwp.Notifications`, `System.Security.Cryptography.ProtectedData` |
-| Tests | `xunit.v3`, `NSubstitute`, `Microsoft.Extensions.TimeProvider.Testing` (Core.Tests), `Microsoft.EntityFrameworkCore.Sqlite` (Infrastructure.Tests, M5). Test projects are `OutputType=Exe` and run on Microsoft Testing Platform, so `Microsoft.NET.Test.Sdk` / `xunit.runner.visualstudio` are not used. |
+| App | `Microsoft.Extensions.Hosting`, `Microsoft.Extensions.Options.DataAnnotations` (M3), `Microsoft.Toolkit.Uwp.Notifications`, `System.Security.Cryptography.ProtectedData` |
+| Tests | `xunit.v3`, `NSubstitute`, `Microsoft.Extensions.TimeProvider.Testing` (Core.Tests, App.Tests), `Microsoft.EntityFrameworkCore.Sqlite` (Infrastructure.Tests, M5). Test projects are `OutputType=Exe` and run on Microsoft Testing Platform, so `Microsoft.NET.Test.Sdk` / `xunit.runner.visualstudio` are not used. |
 
 Packages are added to `Directory.Packages.props` only in the milestone that first uses them.

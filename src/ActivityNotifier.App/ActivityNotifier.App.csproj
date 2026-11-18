@@ -10,6 +10,18 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Generic Host: DI container, configuration, logging, and start/stop of background services. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <!-- Adds ValidateDataAnnotations(): checks the [Range] attributes on our options classes. -->
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Copy the settings file next to the .exe, where the Host looks for it. -->
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ActivityNotifier.Core\ActivityNotifier.Core.csproj" />
     <ProjectReference Include="..\ActivityNotifier.Infrastructure\ActivityNotifier.Infrastructure.csproj" />
   </ItemGroup>

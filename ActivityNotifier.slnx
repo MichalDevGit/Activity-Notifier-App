@@ -5,6 +5,7 @@
     <Project Path="src/ActivityNotifier.Infrastructure/ActivityNotifier.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/ActivityNotifier.App.Tests/ActivityNotifier.App.Tests.csproj" />
     <Project Path="tests/ActivityNotifier.Core.Tests/ActivityNotifier.Core.Tests.csproj" />
     <Project Path="tests/ActivityNotifier.Infrastructure.Tests/ActivityNotifier.Infrastructure.Tests.csproj" />
   </Folder>

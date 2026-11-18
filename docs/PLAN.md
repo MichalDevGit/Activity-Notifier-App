@@ -44,9 +44,9 @@
 | ✅ | **M0** | Docs (this file, ARCHITECTURE.md, CLAUDE.md) → owner review. Then: git init, solution, projects, `Directory.Build.props`, `Directory.Packages.props`, empty test projects, `.gitignore` | 8 (partial), 10 | 0.5 d |
 | ✅ | **M1** | Core models, `InputCounters`, `ActivityTracker` (sessions, events, Lock, snapshots) + tests. `RuleType` / `NotificationRequest` moved to M2. | 1, 2, 3, 6 (partial) | 0.5 d |
 | ✅ | **M2** | `RuleType`, `NotificationRequest`, 4 rules, `RulesEngine` (priority, cooldown, snooze, events) + tests | 1, 2, 3 | 0.5 d |
-| ⬜ | **M3** | Threading layer: Host, `MinuteAggregatorService`, `RulesService`, channels, single-instance mutex, graceful shutdown, concurrency tests | 6, 10 | 0.5 d |
+| ✅ | **M3** | Threading layer: Host, options validation, `MinuteAggregatorService`, `RulesService`, single-instance mutex, graceful shutdown, tray with Exit only, concurrency tests, new `App.Tests` project. `Channel<ActivityMinute>` moved to M5 (built with its consumer). | 6, 10 | 0.5 d |
 | ⬜ | **M4** | Windows: P/Invoke hooks thread, `IdleDetector`, `SystemEventsMonitor`, tray, `ToastNotifier`, `StaticExerciseSuggester` → **first working app** | 4, 5 | 0.5–1 d |
-| ⬜ | **M5** | EF Core + SQLite: entities, `DbContext`, migration, repository, `DbWriterService` + in-memory tests | 7 | 0.5 d |
+| ⬜ | **M5** | EF Core + SQLite: entities, `DbContext`, migration, repository, `Channel<ActivityMinute>` (aggregator → writer), `DbWriterService` + in-memory tests | 7 | 0.5 d |
 | ⬜ | **M6** | Gemini suggester, `DpapiSecretStore`, `NotificationCoordinator` with `SemaphoreSlim` + fake-handler tests | 9, 8 | 0.5 d |
 | ⬜ | **M7** | Security review pass (checklist below), vulnerable-package check, final docs update | 8 | 0.25 d |
 
